@@ -1,12 +1,23 @@
 var http = require('http');
 var fs = require('fs');
 var path = require('path');
-var https = require('https')
-//var dadoStr = '{"usr": "master","pwd": "12345678"}'
-var dadoStr = '{"len": 16}'
+var tls = require('tls');
+
+// Instalação dos componentes para conexão com o Python
+var express = require('express');
+var bodyParser = require('body-parser');
+var request = require('request-promise');
+var app = express();
+ 
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: false }));
+
+var documentoBinarioAssinado = '';
 var documentoBinario = '';
 
 http.createServer(function (request, response) {
+    console.log('Requisitando início do servidor node...');
+
     var filePath = '.' + request.url;
     if (filePath == './')
         filePath = './index.html';
@@ -20,8 +31,7 @@ http.createServer(function (request, response) {
         case '.css':
             contentType = 'text/css';
             break;
-    }
-
+}
 
 fs.readFile(filePath, function(error, content) {
     if (error) {
@@ -44,47 +54,59 @@ fs.readFile(filePath, function(error, content) {
 }).listen(4000);
 console.log('(4000-NODE) Servidor rodando em http://127.0.0.1:4000/');
 
-
 //Criação do WebSocket para comunicação com o cliente Browser
-var WebSocketServer = require('ws').Server, 
+var WebSocketServer = require('ws').Server,
     wss = new WebSocketServer({port: 4001})
-    
+
     wss.on('connection', function (ws) {
-      ws.on('message', function (message) {        
-            documentoBinario = message;
-      });
-    })
+      ws.on('message', function (message) {
+            documentoBinario = message;            
+            console.log("Documento recebido do cliente para ser assinado: " + documentoBinario);
 
-var options = { 
-    hostname: 'hsmlab64.dinamonetworks.com',
-    method: 'POST',
-    port: 443,
-    path: '/api/gen_rand',
-    passphrase: '12345678',
-    key: fs.readFileSync('./certsjson/lab.pri'), 
-    cert: fs.readFileSync('./certsjson/lab.cer'), 
-    ca: fs.readFileSync('./certsjson/hsm.cer'), 
-    rejectUnauthorized: false,
-    headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': dadoStr.length,
-        'Authorization': 'HSM 48D50D8E79ABBEFC5F711B4B517046B29E4F7D52229E1587DB570752E13A081A'
-    }
-}; 
+            const options = {
+                ca: fs.readFileSync('certhsm.pem'),
+                key: fs.readFileSync('keykmip.pem'),
+                cert: fs.readFileSync('certkmip.pem'),
+                host: '192.168.106.50',
+                port: 5696,
+                rejectUnauthorized: false
+                //Error [ERR_TLS_CERT_ALTNAME_INVALID]: Hostname/IP does not match certificate's altnames: IP: 192.168.105.9 is not in the cert's list:
+                // If not false the server will reject any connection which is not 
+                // authorized with the list of supplied CAs. This option only has an effect if requestCert is true. 
+            };
 
-var req = https.request(options, function(res) { 
-    res.on('data', function(data) { 
-        console.log('passou aqui' + data)
-        process.stdout.write(data); 
-    }); 
-}); 
+            // //Criação do TLS para conexão com o HSM
 
-req.on('error', (e) => {
-  console.error('Erro:' + e);
-});
+            var socket = tls.connect(options, () => {
+                console.log('(5696-SOCKET) Conexão ao HSM: ', socket.authorized ? 'authorized' : 'unauthorized');
+                process.stdin.pipe(socket);
+                process.stdin.resume();
+            });
 
-req.write(dadoStr);
-req.end();
+            socket.setEncoding('utf8');
+                
+            if (documentoBinario !== '') {
+                console.log('(5696-SOCKET) Tem hash documento para enviar pro HSM!');
+                //console.log('Documento enviado ao HSM: '+documentoBinario+'\n');
 
-//{ "token":  "48D50D8E79ABBEFC5F711B4B517046B29E4F7D52229E1587DB570752E13A081A" , "cid": 935639491, "pwd_expired": 0}
-// { "rnd": "D98A09FFF997DB8197EFB67CDC23E142"}
+                //ss(socket).emit('sign', stream, documentoBinario);
+                console.log('Enviando uma assinatura!')
+                console.log('Assinatura do cliente: ' + documentoBinario)
+                console.log('Assinatura do cliente enviada: ' + Buffer.from(documentoBinario, 'hex'))
+                const buf2 = Buffer.from(documentoBinario, 'hex');
+                socket.write(buf2+'\n');
+            }
+                
+            socket.on('data', (data) => {
+                documentoBinarioAssinado = data;
+                console.log('Recebeu uma assinatura!')
+                console.log('Assinatura: ' + documentoBinarioAssinado)
+                //console.log('(5696-SOCKET) Assinatura realizada recebida: ' + documentoBinarioAssinado);
+
+                //Enviando documento em binário assinado para o cliente tratar              
+                ws.send(documentoBinarioAssinado);
+
+        	});
+    	});
+  	});
+            
