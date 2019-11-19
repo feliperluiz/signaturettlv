@@ -2,8 +2,6 @@ var http = require('http');
 var fs = require('fs');
 var path = require('path');
 var tls = require('tls');
-
-// Instalação dos componentes para conexão com o Python
 var express = require('express');
 var bodyParser = require('body-parser');
 var request = require('request-promise');
@@ -12,8 +10,8 @@ var app = express();
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 
-var documentoBinarioAssinado = '';
-var documentoBinario = '';
+var queryProfilesAnswer = '';
+var reqQueryProfiles = '';
 
 http.createServer(function (request, response) {
     console.log('Requisitando início do servidor node...');
@@ -60,8 +58,8 @@ var WebSocketServer = require('ws').Server,
 
     wss.on('connection', function (ws) {
       ws.on('message', function (message) {
-            documentoBinario = message;            
-            console.log("Documento recebido do cliente para ser assinado: " + documentoBinario);
+            reqQueryProfiles = message;            
+            console.log("Requisição recebida do cliente para ser enviada ao HSM: " + reqQueryProfiles);
 
             const options = {
                 ca: fs.readFileSync('certhsm.pem'),
@@ -70,12 +68,7 @@ var WebSocketServer = require('ws').Server,
                 host: '192.168.106.50',
                 port: 5696,
                 rejectUnauthorized: false
-                //Error [ERR_TLS_CERT_ALTNAME_INVALID]: Hostname/IP does not match certificate's altnames: IP: 192.168.105.9 is not in the cert's list:
-                // If not false the server will reject any connection which is not 
-                // authorized with the list of supplied CAs. This option only has an effect if requestCert is true. 
             };
-
-            // //Criação do TLS para conexão com o HSM
 
             var socket = tls.connect(options, () => {
                 console.log('(5696-SOCKET) Conexão ao HSM: ', socket.authorized ? 'authorized' : 'unauthorized');
@@ -85,26 +78,20 @@ var WebSocketServer = require('ws').Server,
 
             socket.setEncoding('utf8');
                 
-            if (documentoBinario !== '') {
+            if (reqQueryProfiles !== '') {
                 console.log('(5696-SOCKET) Tem hash documento para enviar pro HSM!');
-                //console.log('Documento enviado ao HSM: '+documentoBinario+'\n');
-
-                //ss(socket).emit('sign', stream, documentoBinario);
-                console.log('Enviando uma assinatura!')
-                console.log('Assinatura do cliente: ' + documentoBinario)
-                console.log('Assinatura do cliente enviada: ' + Buffer.from(documentoBinario, 'hex'))
-                const buf2 = Buffer.from(documentoBinario, 'hex');
+                console.log('Requisição do cliente: ' + reqQueryProfiles)
+                console.log('Requisição do cliente enviada: ' + Buffer.from(reqQueryProfiles, 'hex'))
+                const buf2 = Buffer.from(reqQueryProfiles, 'hex');
                 socket.write(buf2+'\n');
             }
                 
             socket.on('data', (data) => {
-                documentoBinarioAssinado = data;
-                console.log('Recebeu uma assinatura!')
-                console.log('Assinatura: ' + documentoBinarioAssinado)
-                //console.log('(5696-SOCKET) Assinatura realizada recebida: ' + documentoBinarioAssinado);
+                queryProfilesAnswer = data;
+                console.log('Resposta Query Profiles: ' + queryProfilesAnswer)
 
                 //Enviando documento em binário assinado para o cliente tratar              
-                ws.send(documentoBinarioAssinado);
+                ws.send(queryProfilesAnswer);
 
         	});
     	});
